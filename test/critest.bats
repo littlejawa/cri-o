@@ -19,6 +19,7 @@ function teardown() {
 @test "run the critest suite" {
 	critest \
 		--runtime-endpoint "unix://${CRIO_SOCKET}" \
+		--runtime-handler "${RUNTIME_HANDLER}"
 		--image-endpoint "unix://${CRIO_SOCKET}" \
 		--ginkgo.flake-attempts 3 >&3
 
