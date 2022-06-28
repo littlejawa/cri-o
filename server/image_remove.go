@@ -27,12 +27,26 @@ func (s *Server) RemoveImage(ctx context.Context, req *types.RemoveImageRequest)
 	return &types.RemoveImageResponse{}, nil
 }
 
+func (s *Server) untagImageForAllImageServers(img string) error {
+	iServer, err := s.StorageImageServerPerImage(img)
+	if err != nil {
+		return err
+	}
+	for _, is := range iServer {
+		err = is.UntagImage(s.config.SystemContext, img)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) removeImage(ctx context.Context, imageRef string) error {
 	var deleted bool
 	ctx, span := log.StartSpan(ctx)
 	defer span.End()
 
-	images, err := s.StorageImageServer().ResolveNames(s.config.SystemContext, imageRef)
+	images, err := s.MultiStorageImageServer().ResolveNames(s.config.SystemContext, imageRef)
 	if err != nil {
 		if err == storage.ErrCannotParseImageID {
 			images = append(images, imageRef)
@@ -41,7 +55,7 @@ func (s *Server) removeImage(ctx context.Context, imageRef string) error {
 		}
 	}
 	for _, img := range images {
-		err = s.StorageImageServer().UntagImage(s.config.SystemContext, img)
+		err = s.untagImageForAllImageServers(img)
 		if err != nil {
 			log.Debugf(ctx, "Error deleting image %s: %v", img, err)
 			continue
