@@ -52,6 +52,7 @@ type runtimeVM struct {
 	ctx        context.Context
 	client     *ttrpc.Client
 	task       task.TaskService
+	image      task.ImageService
 
 	sync.Mutex
 	ctrs map[string]containerInfo
@@ -140,6 +141,34 @@ func (r *runtimeVM) CreateContainer(ctx context.Context, c *Container, cgroupPar
 			}
 		}
 	}()
+
+	piRequest := &task.PullImageRequest{
+		// Name of the image.
+		Image: c.imageName,
+	}
+	pullImageCh := make(chan error)
+	go func() {
+		// Pull the image in the VM
+		log.Debugf(ctx, "JUJU - crio calling PullImage on the shim !")
+		if resp, err := r.image.PullImage(r.ctx, piRequest); err != nil {
+			pullImageCh <- errdefs.FromGRPC(err)
+		} else {
+			log.Debugf(ctx, "JUJU - PullImage succeeded, with ImageRef=%s", resp.ImageRef)
+		}
+		close(pullImageCh)
+	}()
+
+	select {
+	case err = <-pullImageCh:
+		if err != nil {
+			// LOG ERROR BUT CONTINUE
+			log.Debugf(ctx, "JUJU - PullImage made an error: %w", err)
+		}
+	case <-time.After(ContainerCreateTimeout):
+		<-pullImageCh
+		// LOG ERROR BUT CONTINUE
+		log.Debugf(ctx, "JUJU - Timeout - PullImage did not finish?")
+	}
 
 	// We can now create the container, interacting with the server
 	request := &task.CreateTaskRequest{
