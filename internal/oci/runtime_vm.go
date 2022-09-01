@@ -274,6 +274,7 @@ func (r *runtimeVM) startRuntimeDaemon(ctx context.Context, c *Container) error 
 	// Update the runtime structure
 	r.client = cl
 	r.task = task.NewTaskClient(cl)
+	r.image = task.NewImageClient(cl)
 
 	return nil
 }
@@ -675,6 +676,7 @@ func (r *runtimeVM) updateContainerStatus(ctx context.Context, c *Container) err
 		cl := ttrpc.NewClient(conn, options)
 		r.client = cl
 		r.task = task.NewTaskClient(cl)
+		r.image = task.NewImageClient(cl)
 	}
 
 	response, err := r.task.State(r.ctx, &task.StateRequest{
