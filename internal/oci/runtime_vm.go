@@ -120,13 +120,18 @@ func (r *runtimeVM) CreateContainer(ctx context.Context, c *Container, cgroupPar
 		opts = marshaledOtps
 	}
 
+	log.Debugf(ctx, "JUJU - RuntimeVM.CreateContainer() calls r.startRuntimeDaemon() for image %s", c.Name())
+
 	// First thing, we need to start the runtime daemon
 	if err := r.startRuntimeDaemon(ctx, c); err != nil {
+		log.Debugf(ctx, "JUJU - RuntimeVM.CreateContainer() returns in error from r.startRuntimeDaemon()")
 		return err
 	}
 
+	log.Debugf(ctx, "JUJU - RuntimeVM.CreateContainer() calls r.createContainerIO() for image %s", c.Name())
 	containerIO, err := r.createContainerIO(ctx, c, cio.WithNewFIFOs(r.fifoDir, c.terminal, c.stdin))
 	if err != nil {
+		log.Debugf(ctx, "JUJU - RuntimeVM.CreateContainer() returns in error from r.createContainerIO()")
 		return err
 	}
 
@@ -142,33 +147,22 @@ func (r *runtimeVM) CreateContainer(ctx context.Context, c *Container, cgroupPar
 		}
 	}()
 
-	piRequest := &task.PullImageRequest{
-		// Name of the image.
+	log.Debugf(ctx, "JUJU - crio calling PullImage on the shim for image %s", c.Name())
+	if r.image == nil {
+		log.Debugf(ctx, "JUJU - crio - ABORT: image service is nil")
+	} else if resp, err := r.image.PullImage(r.ctx, &task.PullImageRequest{
 		Image: c.imageName,
+	}); err != nil {
+		log.Debugf(ctx, "JUJU - crio - PullImage returned in error: %w", err)
+		err = errdefs.FromGRPC(err)
+	} else if resp != nil {
+		log.Debugf(ctx, "JUJU - crio - got PullImage response with ImageRef %s", resp.ImageRef)
 	}
-	pullImageCh := make(chan error)
-	go func() {
-		// Pull the image in the VM
-		log.Debugf(ctx, "JUJU - crio calling PullImage on the shim !")
-		if resp, err := r.image.PullImage(r.ctx, piRequest); err != nil {
-			pullImageCh <- errdefs.FromGRPC(err)
-		} else {
-			log.Debugf(ctx, "JUJU - PullImage succeeded, with ImageRef=%s", resp.ImageRef)
-		}
-		close(pullImageCh)
-	}()
-
-	select {
-	case err = <-pullImageCh:
-		if err != nil {
-			// LOG ERROR BUT CONTINUE
-			log.Debugf(ctx, "JUJU - PullImage made an error: %w", err)
-		}
-	case <-time.After(ContainerCreateTimeout):
-		<-pullImageCh
+	if err != nil {
 		// LOG ERROR BUT CONTINUE
-		log.Debugf(ctx, "JUJU - Timeout - PullImage did not finish?")
+		log.Debugf(ctx, "JUJU - crio - PullImage made an error: %w", err)
 	}
+	log.Debugf(ctx, "JUJU - crio is done with PullImage - continuing with CreateRequest")
 
 	// We can now create the container, interacting with the server
 	request := &task.CreateTaskRequest{
