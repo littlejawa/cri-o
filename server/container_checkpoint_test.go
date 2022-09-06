@@ -5,7 +5,9 @@ import (
 	"os"
 
 	"github.com/containers/podman/v4/pkg/criu"
+	cstorage "github.com/containers/storage"
 	"github.com/cri-o/cri-o/internal/oci"
+	"github.com/docker/docker/pkg/archive"
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -14,6 +16,20 @@ import (
 )
 
 var _ = t.Describe("ContainerCheckpoint", func() {
+	mockCheckpointContainer := func() {
+		gomock.InOrder(
+			multiStoreServerMock.EXPECT().GetStore().Return(multiStoreMock),
+			multiStoreMock.EXPECT().GetStoreForContainer(gomock.Any()).Return(storeMock, nil),
+			storeMock.EXPECT().Container(gomock.Any()).Return(&cstorage.Container{}, nil),
+			multiStoreServerMock.EXPECT().GetStore().Return(multiStoreMock),
+			multiStoreMock.EXPECT().GetStoreForContainer(gomock.Any()).Return(storeMock, nil),
+			storeMock.EXPECT().Changes(gomock.Any(), gomock.Any()).Return([]archive.Change{}, nil),
+			multiStoreServerMock.EXPECT().GetImageServerForContainer(gomock.Any()).Return(imageServerMock, nil),
+			imageServerMock.EXPECT().GetStore().Return(storeMock),
+			storeMock.EXPECT().Mount(gomock.Any(), gomock.Any()).Return("/tmp/", nil),
+			runtimeServerMock.EXPECT().StopContainer(gomock.Any()).Return(nil),
+		)
+	}
 	// Prepare the sut
 	BeforeEach(func() {
 		beforeEach()
