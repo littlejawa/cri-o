@@ -93,6 +93,29 @@ func newRuntimeVM(path, root, configPath string) RuntimeImpl {
 	}
 }
 
+func (r *runtimeVM) PullImage(ctx context.Context, c *Container) (retErr error) {
+	log.Debugf(ctx, "JUJU - r.PullImage for image %s", c.Name())
+	is := task.NewImageClient(r.client)
+	if is == nil {
+		log.Debugf(ctx, "JUJU - crio - ABORT: image service is nil")
+		return ErrNotInitialized
+	}
+
+	resp, err := is.PullImage(r.ctx, &task.PullImageRequest{
+		Image: c.imageName,
+	})
+	if err != nil {
+		err = errdefs.FromGRPC(err)
+		log.Debugf(ctx, "JUJU - crio - PullImage returned in error: %w", err)
+		return err
+	}
+
+	if resp != nil {
+		log.Debugf(ctx, "JUJU - crio - got PullImage response with ImageRef %s", resp.ImageRef)
+	}
+	return nil
+}
+
 // CreateContainer creates a container.
 func (r *runtimeVM) CreateContainer(ctx context.Context, c *Container, cgroupParent string) (retErr error) {
 	log.Debugf(ctx, "RuntimeVM.CreateContainer() start")
@@ -147,22 +170,7 @@ func (r *runtimeVM) CreateContainer(ctx context.Context, c *Container, cgroupPar
 		}
 	}()
 
-	log.Debugf(ctx, "JUJU - crio calling PullImage on the shim for image %s", c.Name())
-	if r.image == nil {
-		log.Debugf(ctx, "JUJU - crio - ABORT: image service is nil")
-	} else if resp, err := r.image.PullImage(r.ctx, &task.PullImageRequest{
-		Image: c.imageName,
-	}); err != nil {
-		log.Debugf(ctx, "JUJU - crio - PullImage returned in error: %w", err)
-		err = errdefs.FromGRPC(err)
-	} else if resp != nil {
-		log.Debugf(ctx, "JUJU - crio - got PullImage response with ImageRef %s", resp.ImageRef)
-	}
-	if err != nil {
-		// LOG ERROR BUT CONTINUE
-		log.Debugf(ctx, "JUJU - crio - PullImage made an error: %w", err)
-	}
-	log.Debugf(ctx, "JUJU - crio is done with PullImage - continuing with CreateRequest")
+	r.PullImage(ctx, c)
 
 	// We can now create the container, interacting with the server
 	request := &task.CreateTaskRequest{
