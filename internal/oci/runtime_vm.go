@@ -14,13 +14,14 @@ import (
 	"time"
 
 	cgroups "github.com/containerd/cgroups/stats/v1"
+	"github.com/containerd/containerd/api/runtime/task/v2"
 	tasktypes "github.com/containerd/containerd/api/types/task"
 	ctrio "github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/namespaces"
 	cio "github.com/containerd/containerd/pkg/cri/io"
 	cioutil "github.com/containerd/containerd/pkg/ioutil"
+	"github.com/containerd/containerd/protobuf"
 	client "github.com/containerd/containerd/runtime/v2/shim"
-	"github.com/containerd/containerd/runtime/v2/task"
 	runtimeoptions "github.com/containerd/cri-containerd/pkg/api/runtimeoptions/v1"
 	"github.com/containerd/fifo"
 	"github.com/containerd/ttrpc"
@@ -31,11 +32,11 @@ import (
 	"github.com/cri-o/cri-o/server/metrics"
 	"github.com/cri-o/cri-o/utils"
 	"github.com/cri-o/cri-o/utils/errdefs"
-	ptypes "github.com/gogo/protobuf/types"
 	rspec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"golang.org/x/sys/unix"
+	"google.golang.org/protobuf/types/known/anypb"
 	"k8s.io/client-go/tools/remotecommand"
 	types "k8s.io/cri-api/pkg/apis/runtime/v1"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
@@ -118,7 +119,7 @@ func (r *runtimeVM) PullImage(ctx context.Context, c *Container) (retErr error) 
 
 // CreateContainer creates a container.
 func (r *runtimeVM) CreateContainer(ctx context.Context, c *Container, cgroupParent string) (retErr error) {
-	log.Debugf(ctx, "RuntimeVM.CreateContainer() start")
+	log.Debugf(ctx, "RuntimeVM.CreateContainer() start (runtime = %s)", r.path)
 	defer log.Debugf(ctx, "RuntimeVM.CreateContainer() end")
 
 	// Lock the container
@@ -129,7 +130,7 @@ func (r *runtimeVM) CreateContainer(ctx context.Context, c *Container, cgroupPar
 	// that we'll pass to the ContainerCreateTask, as admins can set
 	// the runtime_config_path to an arbitrary location.  Also, lets
 	// fail early if something goes wrong.
-	var opts *ptypes.Any = nil
+	var opts *anypb.Any = nil
 	if r.configPath != "" {
 		runtimeOptions := &runtimeoptions.Options{
 			ConfigPath: r.configPath,
@@ -140,7 +141,7 @@ func (r *runtimeVM) CreateContainer(ctx context.Context, c *Container, cgroupPar
 			return err
 		}
 
-		opts = marshaledOtps
+		opts = protobuf.FromAny(marshaledOtps)
 	}
 
 	log.Debugf(ctx, "JUJU - RuntimeVM.CreateContainer() calls r.startRuntimeDaemon() for image %s", c.Name())
@@ -170,7 +171,9 @@ func (r *runtimeVM) CreateContainer(ctx context.Context, c *Container, cgroupPar
 		}
 	}()
 
-	r.PullImage(ctx, c)
+	if strings.HasSuffix(r.path, "_img_offload") {
+		r.PullImage(ctx, c)
+	}
 
 	// We can now create the container, interacting with the server
 	request := &task.CreateTaskRequest{
@@ -417,7 +420,7 @@ func (r *runtimeVM) execContainerCommon(ctx context.Context, c *Container, cmd [
 		Stdout:   execIO.Config().Stdout,
 		Stderr:   execIO.Config().Stderr,
 		Terminal: execIO.Config().Terminal,
-		Spec:     any,
+		Spec:     protobuf.FromAny(any),
 	}
 
 	// Create the "exec" process
@@ -518,7 +521,7 @@ func (r *runtimeVM) UpdateContainer(ctx context.Context, c *Container, res *rspe
 
 	if _, err := r.task.Update(r.ctx, &task.UpdateTaskRequest{
 		ID:        c.ID(),
-		Resources: any,
+		Resources: protobuf.FromAny(any),
 	}); err != nil {
 		return errdefs.FromGRPC(err)
 	}
@@ -697,18 +700,18 @@ func (r *runtimeVM) updateContainerStatus(ctx context.Context, c *Container) err
 
 	status := c.state.Status
 	switch response.Status {
-	case tasktypes.StatusCreated:
+	case tasktypes.Status_CREATED:
 		status = ContainerStateCreated
-	case tasktypes.StatusRunning:
+	case tasktypes.Status_RUNNING:
 		status = ContainerStateRunning
-	case tasktypes.StatusStopped:
+	case tasktypes.Status_STOPPED:
 		status = ContainerStateStopped
-	case tasktypes.StatusPaused:
+	case tasktypes.Status_PAUSED:
 		status = ContainerStatePaused
 	}
 
 	c.state.Status = status
-	c.state.Finished = response.ExitedAt
+	c.state.Finished = response.ExitedAt.AsTime()
 	exitCode := int32(response.ExitStatus)
 	c.state.ExitCode = &exitCode
 	c.state.Pid = int(response.Pid)
