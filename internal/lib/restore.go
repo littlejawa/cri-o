@@ -65,13 +65,17 @@ func (c *ContainerServer) ContainerRestore(
 	if ctr.RestoreArchive() != "" {
 		if ctr.RestoreIsOCIImage() {
 			log.Debugf(ctx, "Restoring from %v", ctr.RestoreArchive())
-			imageMountPoint, err := c.StorageImageServer().GetStore().MountImage(ctr.RestoreArchive(), nil, "")
+			is, err := c.StorageImageServerPerContainer(ctr.ID())
+			if err != nil {
+				return "", err
+			}
+			imageMountPoint, err := is.GetStore().MountImage(ctr.RestoreArchive(), nil, "")
 			if err != nil {
 				return "", err
 			}
 			logrus.Debugf("Checkpoint image mounted at %v", imageMountPoint)
 			defer func() {
-				_, err := c.StorageImageServer().GetStore().UnmountImage(ctr.RestoreArchive(), true)
+				_, err := is.GetStore().UnmountImage(ctr.RestoreArchive(), true)
 				if err != nil {
 					log.Errorf(ctx, "Failed to unmount checkpoint image: %q", err)
 				}

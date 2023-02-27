@@ -73,16 +73,20 @@ func (s *Server) CRImportCheckpoint(
 
 	if checkpointIsOCIImage {
 		log.Debugf(ctx, "Restoring from oci image %s\n", input)
-
-		imageRef, err := istorage.Transport.ParseStoreReference(s.ContainerServer.StorageImageServer().GetStore(), input)
-		if err != nil {
-			return "", fmt.Errorf("failed to parse image name: %s: %w", input, err)
-		}
-		img, err := istorage.Transport.GetStoreImage(s.ContainerServer.StorageImageServer().GetStore(), imageRef)
+		is, err := s.ContainerServer.StorageImageServerPerContainer(ctrID)
 		if err != nil {
 			return "", err
 		}
-		mountPoint, err = s.ContainerServer.StorageImageServer().GetStore().MountImage(img.ID, nil, "")
+
+		imageRef, err := istorage.Transport.ParseStoreReference(is.GetStore(), input)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse image name: %s: %w", input, err)
+		}
+		img, err := istorage.Transport.GetStoreImage(is.GetStore(), imageRef)
+		if err != nil {
+			return "", err
+		}
+		mountPoint, err = is.GetStore().MountImage(img.ID, nil, "")
 		if err != nil {
 			return "", err
 		}
@@ -91,7 +95,7 @@ func (s *Server) CRImportCheckpoint(
 		logrus.Debugf("Checkpoint image %s mounted at %v\n", input, mountPoint)
 
 		defer func() {
-			if _, err := s.ContainerServer.StorageImageServer().GetStore().UnmountImage(input, true); err != nil {
+			if _, err := is.GetStore().UnmountImage(input, true); err != nil {
 				logrus.Errorf("Could not unmount checkpoint image %s: %q", input, err)
 			}
 		}()
