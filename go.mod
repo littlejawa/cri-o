@@ -8,7 +8,7 @@ require (
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/containerd/cgroups v1.0.1
 	github.com/containerd/containerd v1.5.2
-	github.com/containerd/ttrpc v1.0.2
+	github.com/containerd/ttrpc v1.2.1
 	github.com/containerd/typeurl v1.0.2
 	github.com/containernetworking/cni v0.8.1
 	github.com/containernetworking/plugins v0.9.1
@@ -56,7 +56,7 @@ require (
 	github.com/vishvananda/netlink v1.1.1-0.20201029203352-d40f9887b852
 	golang.org/x/net v0.0.0-20210428140749-89ef3d95e781
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210603125802-9665404d3644
+	golang.org/x/sys v0.1.0
 	google.golang.org/grpc v1.38.0
 	k8s.io/api v0.21.2
 	k8s.io/apimachinery v0.21.2
