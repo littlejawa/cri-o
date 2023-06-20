@@ -47,6 +47,7 @@ import (
 // for VM based container runtimes.
 type runtimeVM struct {
 	path       string
+	crioSocket string
 	fifoDir    string
 	configPath string
 	exitsPath  string
@@ -68,7 +69,7 @@ const (
 )
 
 // newRuntimeVM creates a new runtimeVM instance
-func newRuntimeVM(path, root, configPath, exitsPath string) RuntimeImpl {
+func newRuntimeVM(path, root, configPath, exitsPath, crioSock string) RuntimeImpl {
 	logrus.Debug("oci.newRuntimeVM() start")
 	defer logrus.Debug("oci.newRuntimeVM() end")
 
@@ -86,7 +87,7 @@ func newRuntimeVM(path, root, configPath, exitsPath string) RuntimeImpl {
 
 	return &runtimeVM{
 		path:       path,
-		configPath: configPath,
+		configPath: crioSock,
 		exitsPath:  exitsPath,
 		fifoDir:    filepath.Join(root, "crio", "fifo"),
 		ctx:        context.Background(),
@@ -201,6 +202,7 @@ func (r *runtimeVM) startRuntimeDaemon(ctx context.Context, c *Container) error 
 		r.ctx,
 		&client.CommandConfig{
 			Runtime: r.path,
+			Address: "unix:///var/run/crio/crio.sock",
 			Path:    c.BundlePath(),
 			Args:    args,
 		},
