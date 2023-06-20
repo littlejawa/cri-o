@@ -87,7 +87,8 @@ func newRuntimeVM(path, root, configPath, exitsPath, crioSock string) RuntimeImp
 
 	return &runtimeVM{
 		path:       path,
-		configPath: crioSock,
+		crioSocket: crioSock,
+		configPath: configPath,
 		exitsPath:  exitsPath,
 		fifoDir:    filepath.Join(root, "crio", "fifo"),
 		ctx:        context.Background(),
@@ -202,7 +203,7 @@ func (r *runtimeVM) startRuntimeDaemon(ctx context.Context, c *Container) error 
 		r.ctx,
 		&client.CommandConfig{
 			Runtime: r.path,
-			Address: "unix:///var/run/crio/crio.sock",
+			Address: r.crioSocket,
 			Path:    c.BundlePath(),
 			Args:    args,
 		},
