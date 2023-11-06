@@ -218,6 +218,10 @@ type RuntimeHandler struct {
 	// PlatformRuntimePaths defines a configuration option that specifies
 	// the runtime paths for different platforms.
 	PlatformRuntimePaths map[string]string `toml:"platform_runtime_paths,omitempty"`
+
+	// Marks the runtime as performing image pulling on its own, and doesn't
+	// require crio to do it.
+	RuntimePullImage bool `toml:"runtime_pull_image,omitempty"`
 }
 
 // Multiple runtime Handlers in a map
