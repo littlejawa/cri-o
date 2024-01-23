@@ -257,6 +257,13 @@ func (r *runtimeVM) startRuntimeDaemon(ctx context.Context, c *Container) error 
 			Runtime: r.path,
 			Path:    c.BundlePath(),
 			Args:    args,
+			// This adress is used fot the "publish" command.
+			// It is ignored by crio, but the kata shim need it to be non-empty.
+			// It should be something like "/var/run/crio/crio.sock"
+			// but as it will be ignored, we're putting here a string that will
+			// be meaningful if it ever shows up in some logs.
+			// See https://github.com/cri-o/cri-o/pull/5129
+			Address: "/shimv2/publishing/events/unsupported/by/crio.sock",
 		},
 	)
 	if err != nil {
@@ -279,6 +286,15 @@ func (r *runtimeVM) startRuntimeDaemon(ctx context.Context, c *Container) error 
 			log.Errorf(ctx, "Copy shim log: %v", err)
 		}
 	}()
+
+	// edit the environment: remove the TTRPC_ADDRESS environment variable,
+	// as publishing events in the shimv2 way is not supported by crio
+	for i, v := range cmd.Env {
+		if strings.HasPrefix(v, "TTRPC_ADDRESS=") {
+			cmd.Env = append(cmd.Env[:i], cmd.Env[i+1:]...)
+			break
+		}
+	}
 
 	// Start the server
 	out, err := cmd.CombinedOutput()
