@@ -259,11 +259,8 @@ func (r *runtimeVM) startRuntimeDaemon(ctx context.Context, c *Container) error 
 			Args:    args,
 			// This adress is used fot the "publish" command.
 			// It is ignored by crio, but the kata shim need it to be non-empty.
-			// It should be something like "/var/run/crio/crio.sock"
-			// but as it will be ignored, we're putting here a string that will
-			// be meaningful if it ever shows up in some logs.
 			// See https://github.com/cri-o/cri-o/pull/5129
-			Address: "/shimv2/publishing/events/unsupported/by/crio.sock",
+			Address: "/var/run/crio/crio.sock",
 		},
 	)
 	if err != nil {
