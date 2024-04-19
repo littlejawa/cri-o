@@ -43,6 +43,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"golang.org/x/sys/unix"
+	"google.golang.org/protobuf/proto"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	"k8s.io/client-go/tools/remotecommand"
 	types "k8s.io/cri-api/pkg/apis/runtime/v1"
@@ -283,6 +284,13 @@ func (r *runtimeVM) startRuntimeDaemon(ctx context.Context, c *Container) error 
 	// Start the server
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Errorf(ctx, "runtimeVM: error trying to start the shim process")
+
+		cleanupErr := r.killRuntimeDaemon(ctx, c)
+		if cleanupErr != nil {
+			log.Errorf(ctx, "runtimeVM: Error during cleanup after failed shim start: %v", cleanupErr)
+		}
+		// return the initial error only
 		return fmt.Errorf("%s: %w", string(out), err)
 	}
 
@@ -302,6 +310,58 @@ func (r *runtimeVM) startRuntimeDaemon(ctx context.Context, c *Container) error 
 	r.client = cl
 	r.task = task.NewTaskClient(cl)
 
+	return nil
+}
+
+func (r *runtimeVM) killRuntimeDaemon(ctx context.Context, c *Container) error {
+	log.Debugf(ctx, "RuntimeVM.killRuntimeDaemon() start")
+	defer log.Debugf(ctx, "RuntimeVM.killRuntimeDaemon() end")
+
+	// Prepare the command to run
+	args := []string{"-id", c.ID()}
+
+	switch logrus.GetLevel() {
+	case logrus.DebugLevel, logrus.TraceLevel:
+		args = append(args, "-debug")
+	}
+	args = append(args, "delete")
+
+	r.ctx = namespaces.WithNamespace(r.ctx, namespaces.Default)
+
+	// Prepare the command to exec
+	cmd, err := client.Command(
+		r.ctx,
+		&client.CommandConfig{
+			Runtime: r.path,
+			Path:    c.BundlePath(),
+			Args:    args,
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	var (
+		out  = bytes.NewBuffer(nil)
+		errb = bytes.NewBuffer(nil)
+	)
+	cmd.Stdout = out
+	cmd.Stderr = errb
+	if err := cmd.Run(); err != nil {
+		log.Debugf(ctx, "Shim v2: cleanup call failed")
+		return fmt.Errorf("%s: %w", errb.String(), err)
+	}
+	s := errb.String()
+	if s != "" {
+		log.Debugf(ctx, "Shim v2: cleanup warnings %s", s)
+	}
+	var response task.DeleteResponse
+	if err := proto.Unmarshal(out.Bytes(), &response); err != nil {
+		return err
+	}
+
+	log.Debugf(ctx, "Shim v2: cleanup succeeeded with exitstatus %d procID %d, exited at %v",
+		response.ExitStatus, response.Pid, protobuf.FromTimestamp(response.ExitedAt))
 	return nil
 }
 
@@ -763,6 +823,13 @@ func (r *runtimeVM) updateContainerStatus(ctx context.Context, c *Container) err
 		address := strings.TrimSpace(string(data))
 		conn, err := client.Connect(address, client.AnonDialer)
 		if err != nil {
+			// failed to connect to the shim. Is it dead? Run the cleanup just in case
+			log.Errorf(ctx, "runtimeVM: failed to connect to the shim on address %s", address)
+			cleanupErr := r.killRuntimeDaemon(ctx, c)
+			if cleanupErr != nil {
+				log.Errorf(ctx, "runtimeVM: cleanup failed after reconnect failed: %v", cleanupErr)
+			}
+			// return the initial error only
 			return err
 		}
 		options := ttrpc.WithOnClose(func() { conn.Close() })
