@@ -73,9 +73,9 @@ func (c *ContainerServer) Store() cstorage.Store {
 	return c.store
 }
 
-// StorageImageServer returns the ImageServer for the ContainerServer.
-func (c *ContainerServer) StorageImageServer() storage.ImageServer {
-	return c.storageImgSvcMgr.GetImageService()
+// ImageServiceMgr returns the ImageServiceManager for the ContainerServer.
+func (c *ContainerServer) ImageServiceMgr() *storage.ImageServiceManager {
+	return c.storageImgSvcMgr
 }
 
 // CtrIDIndex returns the TruncIndex for the ContainerServer.

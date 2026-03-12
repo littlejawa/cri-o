@@ -47,8 +47,11 @@ func (c *ContainerServer) ContainerRestore(
 	if err != nil {
 		return "", err
 	}
+
+	imageService := c.ImageServiceMgr().GetImageService()
+
 	// During checkpointing the container is unmounted. This mounts the container again.
-	mountPoint, err := c.StorageImageServer().GetStore().Mount(ctr.ID(), ctrSpec.Config.Linux.MountLabel)
+	mountPoint, err := imageService.GetStore().Mount(ctr.ID(), ctrSpec.Config.Linux.MountLabel)
 	if err != nil {
 		log.Debugf(ctx, "Failed to mount container %q: %v", ctr.ID(), err)
 
@@ -68,7 +71,7 @@ func (c *ContainerServer) ContainerRestore(
 		if ctr.RestoreStorageImageID() != nil {
 			log.Debugf(ctx, "Restoring from %v", ctr.RestoreStorageImageID())
 			// This is not out-of-process, but it is at least out of the CRI-O codebase; containers/storage uses raw strings.
-			imageMountPoint, err := c.StorageImageServer().GetStore().MountImage(ctr.RestoreStorageImageID().IDStringForOutOfProcessConsumptionOnly(), nil, "")
+			imageMountPoint, err := imageService.GetStore().MountImage(ctr.RestoreStorageImageID().IDStringForOutOfProcessConsumptionOnly(), nil, "")
 			if err != nil {
 				return "", err
 			}
@@ -77,7 +80,7 @@ func (c *ContainerServer) ContainerRestore(
 
 			defer func() {
 				// This is not out-of-process, but it is at least out of the CRI-O codebase; containers/storage uses raw strings.
-				_, err := c.StorageImageServer().GetStore().UnmountImage(ctr.RestoreStorageImageID().IDStringForOutOfProcessConsumptionOnly(), true)
+				_, err := imageService.GetStore().UnmountImage(ctr.RestoreStorageImageID().IDStringForOutOfProcessConsumptionOnly(), true)
 				if err != nil {
 					log.Errorf(ctx, "Failed to unmount checkpoint image: %q", err)
 				}

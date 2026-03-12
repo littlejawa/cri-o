@@ -94,7 +94,7 @@ func (s *Server) CRImportCheckpoint(
 		log.Debugf(ctx, "Restoring from oci image %s", inputImage)
 
 		// This is not out-of-process, but it is at least out of the CRI-O codebase; containers/storage uses raw strings.
-		mountPoint, err = s.ContainerServer.StorageImageServer().GetStore().MountImage(restoreStorageImageID.IDStringForOutOfProcessConsumptionOnly(), nil, "")
+		mountPoint, err = s.ContainerServer.ImageServiceMgr().GetImageService().GetStore().MountImage(restoreStorageImageID.IDStringForOutOfProcessConsumptionOnly(), nil, "")
 		if err != nil {
 			return "", err
 		}
@@ -103,7 +103,7 @@ func (s *Server) CRImportCheckpoint(
 
 		defer func() {
 			// This is not out-of-process, but it is at least out of the CRI-O codebase; containers/storage uses raw strings.
-			if _, err := s.ContainerServer.StorageImageServer().GetStore().UnmountImage(restoreStorageImageID.IDStringForOutOfProcessConsumptionOnly(), true); err != nil {
+			if _, err := s.ContainerServer.ImageServiceMgr().GetImageService().GetStore().UnmountImage(restoreStorageImageID.IDStringForOutOfProcessConsumptionOnly(), true); err != nil {
 				log.Errorf(ctx, "Could not unmount checkpoint image %s: %q", restoreStorageImageID, err)
 			}
 		}()

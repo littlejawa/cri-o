@@ -12,6 +12,7 @@ import (
 // It allows for easy switching between different image storage backends
 // depending on the configuration or environment.
 type ImageServiceManager struct {
+	serverConfig *config.Config
 	imageService *imageService
 }
 
@@ -26,6 +27,7 @@ func GetImageServiceManager(ctx context.Context, store storage.Store, storageTra
 	}
 
 	return &ImageServiceManager{
+		serverConfig: serverConfig,
 		imageService: is.(*imageService),
 	}, nil
 }
