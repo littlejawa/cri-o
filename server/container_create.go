@@ -1282,7 +1282,7 @@ func (s *Server) resolveAndVerifyContainerImage(ctx context.Context, ctr contain
 	}
 
 	var imgResult *storage.ImageResult
-	imageService := s.ContainerServer.ImageServiceMgr().GetImageService()
+	imageService := s.ContainerServer.ImageServiceMgr().GetImageService(sb.RuntimeHandler())
 	if id := imageService.HeuristicallyTryResolvingStringAsIDPrefix(userRequestedImage); id != nil {
 		imgResult, err = imageService.ImageStatusByID(s.config.SystemContext, *id)
 		if err != nil {
