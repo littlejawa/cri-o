@@ -40,7 +40,7 @@ func (s *Server) removeImage(ctx context.Context, imageRef string) (untagErr err
 	ctx, span := log.StartSpan(ctx)
 	defer span.End()
 
-	imageService := s.ContainerServer.ImageServiceMgr().GetImageService()
+	imageService := s.ContainerServer.ImageServiceMgr().GetImageService("")
 
 	if id := imageService.HeuristicallyTryResolvingStringAsIDPrefix(imageRef); id != nil {
 		if err := s.volumeInUse(id.IDStringForOutOfProcessConsumptionOnly()); err != nil {

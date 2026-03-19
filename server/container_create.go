@@ -1445,7 +1445,7 @@ func (s *Server) verifyImageSignature(ctx context.Context, namespace, userSpecif
 			return fmt.Errorf("unable to get userSpecifiedImageRef from user specified image %q: %w", userSpecifiedImage, err)
 		}
 
-		if err := s.ContainerServer.ImageServiceMgr().GetImageService().IsRunningImageAllowed(ctx, &systemCtx, userSpecifiedImageRef, status.ID); err != nil {
+		if err := s.ContainerServer.ImageServiceMgr().GetImageService("").IsRunningImageAllowed(ctx, &systemCtx, userSpecifiedImageRef, status.ID); err != nil {
 			return err
 		}
 	}

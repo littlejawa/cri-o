@@ -632,7 +632,7 @@ func (s *Server) startReloadWatcher(ctx context.Context) {
 			}
 			// ImageServer compiles the list with regex for both
 			// pinned and sandbox/pause images, we need to update them
-			s.ContainerServer.ImageServiceMgr().GetImageService().UpdatePinnedImagesList(append(s.config.PinnedImages, s.config.PauseImage))
+			s.ContainerServer.ImageServiceMgr().GetImageService("").UpdatePinnedImagesList(append(s.config.PinnedImages, s.config.PauseImage))
 			log.Infof(ctx, "Configuration reload completed")
 			// Print the current configuration.
 			tomlConfig, err := s.config.ToString()
@@ -723,7 +723,7 @@ func (s *Server) wipeIfAppropriate(ctx context.Context, imagesToDelete []storage
 	// disk usage gets too high.
 	if shouldWipeImages {
 		for img := range imageMapToDelete {
-			if err := s.ContainerServer.ImageServiceMgr().GetImageService().DeleteImage(s.config.SystemContext, img); err != nil {
+			if err := s.ContainerServer.ImageServiceMgr().GetImageService("").DeleteImage(s.config.SystemContext, img); err != nil {
 				log.Warnf(ctx, "Failed to remove image %s: %v", img, err)
 			}
 		}
