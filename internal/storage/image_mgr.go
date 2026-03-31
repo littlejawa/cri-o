@@ -28,7 +28,7 @@ func (i *ImageServiceManager) GetImageService(runtimeHandler string) ImageServer
 	if isRuntimePullImage {
 		return i.imageServiceVM
 	}
-	return i.imageService
+	return i.imageServiceVM
 }
 
 func GetImageServiceManager(ctx context.Context, store storage.Store, storageTransport StorageTransport, serverConfig *config.Config) (*ImageServiceManager, error) {
@@ -37,7 +37,7 @@ func GetImageServiceManager(ctx context.Context, store storage.Store, storageTra
 		return nil, err
 	}
 
-	is_vm := GetImageServiceVM(ctx, is)
+	is_vm := GetImageServiceVM(ctx, is.(*imageService))
 
 	return &ImageServiceManager{
 		serverConfig:   serverConfig,

@@ -8,18 +8,18 @@ import "context"
 // image service managers in the backend.
 type RuntimeServiceManager struct {
 	runtimeService   *runtimeService
-	runtimeServiceVM *runtimeService
+	runtimeServiceVM *runtimeServiceVM
 }
 
 func (r *RuntimeServiceManager) GetRuntimeService() RuntimeServer {
-	return r.runtimeService
+	return r.runtimeServiceVM
 }
 
 func GetRuntimeServiceManager(ctx context.Context, imageServiceMgr *ImageServiceManager, storageTransport StorageTransport) *RuntimeServiceManager {
 	rs := GetRuntimeService(ctx, imageServiceMgr.imageService, storageTransport)
-	rs_vm := GetRuntimeService(ctx, imageServiceMgr.imageServiceVM, storageTransport)
+	rs_vm := GetRuntimeServiceVM(ctx, rs, imageServiceMgr.imageServiceVM, storageTransport)
 	return &RuntimeServiceManager{
 		runtimeService:   rs.(*runtimeService),
-		runtimeServiceVM: rs_vm.(*runtimeService),
+		runtimeServiceVM: rs_vm.(*runtimeServiceVM),
 	}
 }
