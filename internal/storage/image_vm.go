@@ -2,11 +2,21 @@ package storage
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cri-o/cri-o/internal/log"
+	"github.com/cri-o/cri-o/internal/ociartifact"
+	"github.com/cri-o/cri-o/internal/storage/references"
+	"go.podman.io/common/libimage"
+	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/types"
 	"go.podman.io/storage"
 )
+
+type cachedImageRefs struct {
+	imageResult    ImageResult
+	storageImageID StorageImageID
+}
 
 // imageServiceVM is the ImageServer interface implementation that is more appropriate
 // for VM based container runtimes.
@@ -17,14 +27,22 @@ type imageServiceVM struct {
 	// operations. This allows imageServiceVM to delegate the core image handling tasks
 	// to the storage.ImageServer, while providing a VM-specific interface where
 	// needed.
-	storageImageServer ImageServer
+	storageImageServer *imageService
+
+	// FIXME: we're currently storing the StorageImageId and ImageResult in memory.
+	// We should find a way to persist this information in the storage, so that
+	// it can survive a restart of CRI-O.
+
+	// list of known RegistryImageReference with associated ImageResult and StorageID
+	knownImages map[RegistryImageReference]cachedImageRefs
 }
 
 // GetImageServiceVM creates a new imageServiceVM instance.
-func GetImageServiceVM(ctx context.Context, imageServer ImageServer) ImageServer {
+func GetImageServiceVM(ctx context.Context, imageService *imageService) ImageServer {
 	return &imageServiceVM{
 		ctx:                ctx,
-		storageImageServer: imageServer,
+		storageImageServer: imageService,
+		knownImages:        make(map[RegistryImageReference]cachedImageRefs),
 	}
 }
 
@@ -39,6 +57,13 @@ func (i *imageServiceVM) ListImages(systemContext *types.SystemContext) ([]Image
 func (i *imageServiceVM) ImageStatusByID(systemContext *types.SystemContext, id StorageImageID) (*ImageResult, error) {
 	log.Debugf(i.ctx, "ImageServiceVM.ImageStatusByID() start")
 	defer log.Debugf(i.ctx, "ImageServiceVM.ImageStatusByID() end")
+
+	for _, result := range i.knownImages {
+		if result.storageImageID == id {
+			return &result.imageResult, nil
+		}
+	}
+
 	return i.storageImageServer.ImageStatusByID(systemContext, id)
 }
 
@@ -46,25 +71,98 @@ func (i *imageServiceVM) ImageStatusByID(systemContext *types.SystemContext, id 
 func (i *imageServiceVM) ImageStatusByName(systemContext *types.SystemContext, name RegistryImageReference) (*ImageResult, error) {
 	log.Debugf(i.ctx, "ImageServiceVM.ImageStatusByName() start")
 	defer log.Debugf(i.ctx, "ImageServiceVM.ImageStatusByName() end")
+
+	// look at our list of known image references, and if we find a match
+	// return the associated ImageResult.
+	if result, exists := i.knownImages[name]; exists {
+		return &result.imageResult, nil
+	}
+
 	return i.storageImageServer.ImageStatusByName(systemContext, name)
 }
 
-// PullImage imports an image from the specified location.
+// PullImage: do not pull the data, only get the manifest and return an image reference
 //
-// Arguments:
-// - ctx: The context for controlling the function's execution
-// - imageName: A RegistryImageReference representing the image to be pulled
-// - options: Pointer to ImageCopyOptions, which contains various options for the image copy process
-//
-// Returns:
-//   - A name@digest value referring to exactly the pulled image (the reference might become dangling if the image
-//     is removed, but it will not ever match a different image). The value is suitable for PullImageResponse.ImageRef
-//     and for ContainerConfig.Image.Image.
-//   - error: An error object if pulling the image fails, otherwise nil
+// For this runtime, the image management is done within the VM that will run
+// the container. CRI-O has nothing to do with the image, and must actually avoid
+// pulling it, as it may fail if the image is encrypted for instance.
 func (i *imageServiceVM) PullImage(ctx context.Context, imageName RegistryImageReference, options *ImageCopyOptions) (RegistryImageReference, error) {
 	log.Debugf(i.ctx, "ImageServiceVM.PullImage() start")
 	defer log.Debugf(i.ctx, "ImageServiceVM.PullImage() end")
-	return i.storageImageServer.PullImage(ctx, imageName, options)
+	log.Debugf(ctx, "Skip image pull for runtime %s - image %s", "", imageName)
+
+	srcRef, err := i.storageImageServer.lookup.remoteImageReference(imageName)
+	if err != nil {
+		return RegistryImageReference{}, err
+	}
+
+	srcSystemContext := types.SystemContext{}
+	if options.SourceCtx != nil {
+		srcSystemContext = *options.SourceCtx // A shallow copy
+	}
+
+	artifactStore, artifactErr := ociartifact.NewStore(i.GetStore().GraphRoot(), &srcSystemContext)
+	if artifactErr != nil {
+		return RegistryImageReference{}, fmt.Errorf("unable to pull image or OCI artifact: create store err: %w", artifactErr)
+	}
+
+	artifactManifestDigest, artifactErr := artifactStore.PullManifest(ctx, srcRef, &libimage.CopyOptions{
+		OciDecryptConfig: options.OciDecryptConfig,
+		Progress:         options.Progress,
+		RemoveSignatures: true, // signature is not supported for OCI layout dest
+	})
+	if artifactErr != nil {
+		return RegistryImageReference{}, fmt.Errorf("unable to pull image or OCI artifact: pull image err: %w; artifact err: %w", err, artifactErr)
+	}
+
+	canonicalRef, err := reference.WithDigest(reference.TrimNamed(imageName.Raw()), *artifactManifestDigest)
+	if err != nil {
+		return RegistryImageReference{}, fmt.Errorf("create canonical reference: %w", err)
+	}
+
+	imageRef := references.RegistryImageReferenceFromRaw(canonicalRef)
+
+	// create the StorageImageID from the manifest digest
+	ID := newExactStorageImageID(artifactManifestDigest.Encoded())
+
+	// Generate an ImageResult with the available information, so that it can be
+	// returned by ImageStatus when asked with the same reference.
+	// Note that this structure is incomplete, since we're not actually pulling
+	// the image.
+	var repoTags []string
+	var repoDigests []string
+
+	if tagged, ok := imageRef.Raw().(reference.NamedTagged); ok {
+		repoTags = append(repoTags, tagged.String())
+	}
+
+	repoDigests = append(repoDigests, artifactManifestDigest.String())
+
+	imageResult := &ImageResult{
+		ID:                  ID,
+		SomeNameOfThisImage: &imageRef,
+		RepoTags:            repoTags,
+		RepoDigests:         repoDigests,
+		Digest:              *artifactManifestDigest,
+		// Following fields are not available at this stage, and will be left
+		// emty, or with default value
+		Size:         nil,
+		User:         "",
+		PreviousName: "",
+		Labels:       nil,
+		OCIConfig:    nil,
+		Annotations:  nil,
+		Pinned:       false,
+		MountPoint:   "",
+	}
+
+	// Store the generated ImageResult and StorageImageID in our in-memory list of known images
+	i.knownImages[imageName] = cachedImageRefs{
+		imageResult:    *imageResult,
+		storageImageID: ID,
+	}
+
+	return imageRef, nil
 }
 
 // DeleteImage deletes a storage image (impacting all its tags)
@@ -97,6 +195,13 @@ func (i *imageServiceVM) GetStore() storage.Store {
 func (i *imageServiceVM) HeuristicallyTryResolvingStringAsIDPrefix(heuristicInput string) *StorageImageID {
 	log.Debugf(i.ctx, "ImageServiceVM.HeuristicallyTryResolvingStringAsIDPrefix() start")
 	defer log.Debugf(i.ctx, "ImageServiceVM.HeuristicallyTryResolvingStringAsIDPrefix() end")
+
+	for index, result := range i.knownImages {
+		if index.Raw().String() == heuristicInput {
+			return &result.storageImageID
+		}
+	}
+
 	return i.storageImageServer.HeuristicallyTryResolvingStringAsIDPrefix(heuristicInput)
 }
 
@@ -105,7 +210,35 @@ func (i *imageServiceVM) HeuristicallyTryResolvingStringAsIDPrefix(heuristicInpu
 func (i *imageServiceVM) CandidatesForPotentiallyShortImageName(systemContext *types.SystemContext, imageName string) ([]RegistryImageReference, error) {
 	log.Debugf(i.ctx, "ImageServiceVM.CandidatesForPotentiallyShortImageName() start")
 	defer log.Debugf(i.ctx, "ImageServiceVM.CandidatesForPotentiallyShortImageName() end")
-	return i.storageImageServer.CandidatesForPotentiallyShortImageName(systemContext, imageName)
+
+	// get candidates from the underlying storage image server
+	candidates, err := i.storageImageServer.CandidatesForPotentiallyShortImageName(systemContext, imageName)
+	if err != nil {
+		return nil, err
+	}
+
+	// add the know image references from our in-memory list of ImageResults
+	for _, result := range i.knownImages {
+		if result.imageResult.SomeNameOfThisImage != nil {
+			candidateName := result.imageResult.SomeNameOfThisImage.Raw().String()
+			// Check if the candidate name matches the input image name
+			// skip duplicates
+			if candidateName == imageName {
+				alreadyPresent := false
+				for _, existing := range candidates {
+					if existing.Raw().String() == candidateName {
+						alreadyPresent = true
+						break
+					}
+				}
+				if !alreadyPresent {
+					candidates = append(candidates, *result.imageResult.SomeNameOfThisImage)
+				}
+			}
+		}
+	}
+
+	return candidates, nil
 }
 
 // UpdatePinnedImagesList updates pinned and pause images list in imageService.
