@@ -6,7 +6,6 @@ import (
 
 	json "github.com/goccy/go-json"
 	"github.com/sirupsen/logrus"
-	istorage "go.podman.io/image/v5/storage"
 	"go.podman.io/image/v5/types"
 	"go.podman.io/storage"
 )
@@ -26,7 +25,7 @@ type runtimeServiceVM struct {
 	// sepcific handling of the image management.
 	runtimeServiceVM RuntimeServer
 
-	storageImageServer ImageServer
+	storageImageServer *imageServiceVM
 	ctx                context.Context
 }
 
@@ -60,20 +59,7 @@ func (r *runtimeServiceVM) createContainerOrPodSandbox(systemContext *types.Syst
 	}
 
 	// Pull out a copy of the image's configuration.
-	// Ideally we would call imageID.imageRef(r.storageImageServer), but storageImageServer does not have access to private data.
-	ref, err := istorage.Transport.NewStoreReference(r.storageImageServer.GetStore(), nil, template.imageID.privateID)
-	if err != nil {
-		return ContainerInfo{}, err
-	}
-
-	image, err := ref.NewImage(r.ctx, systemContext)
-	if err != nil {
-		return ContainerInfo{}, err
-	}
-
-	defer image.Close()
-
-	imageConfig, err := image.OCIConfig(r.ctx)
+	imageConfig, err := r.storageImageServer.GetConfigForImage(r.ctx, template.userRequestedImage)
 	if err != nil {
 		return ContainerInfo{}, err
 	}
@@ -100,7 +86,10 @@ func (r *runtimeServiceVM) createContainerOrPodSandbox(systemContext *types.Syst
 		coptions.IDMappingOptions = *idMappingsOptions
 	}
 
-	container, err := r.storageImageServer.GetStore().CreateContainer(containerID, names, template.imageID.privateID, "", string(mdata), &coptions)
+	// Call CreateContainer with an empty image name, to avoid image lookup
+	// as we don't actually want to create this container with a local image.
+	imageID := ""
+	container, err := r.storageImageServer.GetStore().CreateContainer(containerID, names, imageID, "", string(mdata), &coptions)
 	if err != nil {
 		if metadata.Pod {
 			logrus.Debugf("Failed to create pod sandbox %s(%s): %v", metadata.PodName, metadata.PodID, err)
@@ -238,7 +227,7 @@ func (r *runtimeServiceVM) GetRunDir(id string) (string, error) {
 // service to pull and manage images, and its store to manage containers based
 // on those images.
 // The provided ImageServer must be an instance of ImageServiceVM
-func GetRuntimeServiceVM(ctx context.Context, runtimeService RuntimeServer, storageImageServer ImageServer, storageTransport StorageTransport) RuntimeServer {
+func GetRuntimeServiceVM(ctx context.Context, runtimeService RuntimeServer, storageImageServer *imageServiceVM, storageTransport StorageTransport) RuntimeServer {
 	if storageTransport == nil {
 		storageTransport = nativeStorageTransport{}
 	}
