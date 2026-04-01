@@ -7,6 +7,7 @@ import (
 	"github.com/cri-o/cri-o/internal/log"
 	"github.com/cri-o/cri-o/internal/ociartifact"
 	"github.com/cri-o/cri-o/internal/storage/references"
+	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/common/libimage"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/types"
@@ -125,6 +126,12 @@ func (i *imageServiceVM) PullImage(ctx context.Context, imageName RegistryImageR
 	// create the StorageImageID from the manifest digest
 	ID := newExactStorageImageID(artifactManifestDigest.Encoded())
 
+	// Get the OCIConfig
+	ociConfig, err := artifactStore.PullConfig(ctx, artifactManifestDigest.Encoded(), &ociartifact.PullOptions{})
+	if err != nil {
+		return RegistryImageReference{}, fmt.Errorf("unable to pull image or OCI artifact: pull config err: %w", err)
+	}
+
 	// Generate an ImageResult with the available information, so that it can be
 	// returned by ImageStatus when asked with the same reference.
 	// Note that this structure is incomplete, since we're not actually pulling
@@ -144,13 +151,13 @@ func (i *imageServiceVM) PullImage(ctx context.Context, imageName RegistryImageR
 		RepoTags:            repoTags,
 		RepoDigests:         repoDigests,
 		Digest:              *artifactManifestDigest,
+		OCIConfig:           ociConfig,
 		// Following fields are not available at this stage, and will be left
 		// emty, or with default value
 		Size:         nil,
 		User:         "",
 		PreviousName: "",
 		Labels:       nil,
-		OCIConfig:    nil,
 		Annotations:  nil,
 		Pinned:       false,
 		MountPoint:   "",
@@ -259,4 +266,22 @@ func (i *imageServiceVM) IsRunningImageAllowed(ctx context.Context, systemContex
 	log.Debugf(i.ctx, "ImageServiceVM.IsRunningImageAllowed() start")
 	defer log.Debugf(i.ctx, "ImageServiceVM.IsRunningImageAllowed() end")
 	return i.storageImageServer.IsRunningImageAllowed(ctx, systemContext, userSpecifiedImage, imageID)
+}
+
+// GetConfigForImage returns the OCI config for the given image reference.
+//
+// The config is retrieved as part of the PullImage process, and stored in our
+// in-memory list of known images, so that it can be returned here without
+// pulling anything.
+func (i *imageServiceVM) GetConfigForImage(ctx context.Context, imageName string) (*v1.Image, error) {
+	log.Debugf(i.ctx, "ImageServiceVM.GetConfigForImage() start")
+	defer log.Debugf(i.ctx, "ImageServiceVM.GetConfigForImage() end")
+
+	for index, result := range i.knownImages {
+		if index.Raw().String() == imageName {
+			return result.imageResult.OCIConfig, nil
+		}
+	}
+
+	return nil, fmt.Errorf("image not found: %s", imageName)
 }
