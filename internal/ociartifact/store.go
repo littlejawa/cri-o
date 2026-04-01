@@ -18,6 +18,7 @@ import (
 	libartStore "go.podman.io/common/pkg/libartifact/store"
 	libartTypes "go.podman.io/common/pkg/libartifact/types"
 	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/image"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/oci/layout"
 	"go.podman.io/image/v5/pkg/blobinfocache"
@@ -420,4 +421,63 @@ func artifactName(annotations map[string]string) string {
 	}
 
 	return ""
+}
+
+// PullConfig returns the pull an image configuration defined by the manifest digest.
+// There is no such config attached to OCI artifacts, but this function can
+// be used to retrieve an image's config without pulling the whole data.
+// This is useful for our support of runtimes that manage image pulls on thir own:
+// cri-o still needs to get the config, but should not pull the data layers.
+func (s *Store) PullConfig(ctx context.Context, nameOrDigest string, opts *PullOptions) (*specs.Image, error) {
+	artifact, nameIsDigest, err := s.getByNameOrDigest(ctx, nameOrDigest)
+	if err != nil {
+		return nil, fmt.Errorf("get artifact by name or digest: %w", err)
+	}
+
+	if nameIsDigest {
+		nameOrDigest = artifact.Reference()
+	}
+
+	// get the ImageSource for the image
+	imageReference, err := s.impl.LayoutNewReference(s.rootPath, nameOrDigest)
+	if err != nil {
+		return nil, fmt.Errorf("create new reference: %w", err)
+	}
+
+	imageSource, err := s.impl.NewImageSource(ctx, imageReference, s.SystemContext())
+	if err != nil {
+		return nil, fmt.Errorf("build image source: %w", err)
+	}
+	defer func() {
+		if err := s.impl.CloseImageSource(imageSource); err != nil {
+			log.Warnf(ctx, "Unable to close image source: %v", err)
+		}
+	}()
+
+	unparsedToplevel := image.UnparsedInstance(imageSource, nil)
+	topManifest, topMIMEType, err := unparsedToplevel.Manifest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get manifest: %w", err)
+	}
+
+	unparsedInstance := unparsedToplevel
+	if manifest.MIMETypeIsMultiImage(topMIMEType) {
+		// This is a manifest list. We need to choose a single instance to work with.
+		manifestList, err := manifest.ListFromBlob(topManifest, topMIMEType)
+		if err != nil {
+			return nil, fmt.Errorf("parsing primary manifest as list: %w", err)
+		}
+		instanceDigest, err := manifestList.ChooseInstance(s.SystemContext())
+		if err != nil {
+			return nil, fmt.Errorf("choosing an image from manifest list: %w", err)
+		}
+
+		unparsedInstance = image.UnparsedInstance(imageSource, &instanceDigest)
+	}
+
+	sourcedImage, err := image.FromUnparsedImage(ctx, s.SystemContext(), unparsedInstance)
+	if err != nil {
+		return nil, fmt.Errorf("getting sourced image from unparsed image: %w", err)
+	}
+	return sourcedImage.OCIConfig(ctx)
 }
