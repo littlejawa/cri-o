@@ -43,7 +43,11 @@ func (s *Server) ListImages(ctx context.Context, req *types.ListImagesRequest) (
 		}
 	}
 
-	results, err := s.ContainerServer.ImageServiceMgr().GetImageService("").ListImages(s.config.SystemContext)
+	var runtimeHandler string
+	if filter := req.GetFilter(); filter != nil && filter.Image != nil {
+		runtimeHandler = filter.Image.GetRuntimeHandler()
+	}
+	results, err := s.ContainerServer.ImageServiceMgr().GetImageService(runtimeHandler).ListImages(s.config.SystemContext)
 	if err != nil {
 		return nil, err
 	}

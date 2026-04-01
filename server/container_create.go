@@ -1319,7 +1319,7 @@ func (s *Server) resolveAndVerifyContainerImage(ctx context.Context, ctr contain
 		someRepoDigest = imgResult.RepoDigests[0]
 	}
 
-	if err := s.verifyImageSignature(ctx, sb.Metadata().GetNamespace(), ctr.Config().GetImage().GetUserSpecifiedImage(), imgResult); err != nil {
+	if err := s.verifyImageSignature(ctx, sb.Metadata().GetNamespace(), ctr.Config().GetImage().GetUserSpecifiedImage(), imgResult, sb.RuntimeHandler()); err != nil {
 		return nil, err
 	}
 
@@ -1421,7 +1421,7 @@ func configureTimezone(tz, containerRunDir, mountPoint, mountLabel, etcPath, con
 }
 
 // verifyImageSignature verifies the signature of a container image.
-func (s *Server) verifyImageSignature(ctx context.Context, namespace, userSpecifiedImage string, status *storage.ImageResult) error {
+func (s *Server) verifyImageSignature(ctx context.Context, namespace, userSpecifiedImage string, status *storage.ImageResult, runtimeHandler string) error {
 	systemCtx, err := s.contextForNamespace(namespace)
 	if err != nil {
 		return fmt.Errorf("get context for namespace: %w", err)
@@ -1445,7 +1445,7 @@ func (s *Server) verifyImageSignature(ctx context.Context, namespace, userSpecif
 			return fmt.Errorf("unable to get userSpecifiedImageRef from user specified image %q: %w", userSpecifiedImage, err)
 		}
 
-		if err := s.ContainerServer.ImageServiceMgr().GetImageService("").IsRunningImageAllowed(ctx, &systemCtx, userSpecifiedImageRef, status.ID); err != nil {
+		if err := s.ContainerServer.ImageServiceMgr().GetImageService(runtimeHandler).IsRunningImageAllowed(ctx, &systemCtx, userSpecifiedImageRef, status.ID); err != nil {
 			return err
 		}
 	}

@@ -35,10 +35,12 @@ func (s *Server) PullImage(ctx context.Context, req *types.PullImageRequest) (*t
 	var err error
 
 	image := ""
+	runtimeHandler := ""
 	img := req.GetImage()
 
 	if img != nil {
 		image = img.GetImage()
+		runtimeHandler = img.GetRuntimeHandler()
 	}
 
 	log.Infof(ctx, "Pulling image: %s", image)
@@ -109,7 +111,7 @@ func (s *Server) PullImage(ctx context.Context, req *types.PullImageRequest) (*t
 			s.pullOperationsLock.Unlock()
 		}()
 
-		pullOp.imageRef, pullOp.err = s.pullImage(ctx, &pullArgs)
+		pullOp.imageRef, pullOp.err = s.pullImage(ctx, &pullArgs, runtimeHandler)
 	} else {
 		// Wait for the pull operation to finish.
 		pullOp.wg.Wait()
@@ -133,7 +135,7 @@ func (s *Server) PullImage(ctx context.Context, req *types.PullImageRequest) (*t
 // pullImage performs the actual pull operation of PullImage. Used to separate
 // the pull implementation from the pullCache logic in PullImage and improve
 // readability and maintainability.
-func (s *Server) pullImage(ctx context.Context, pullArgs *pullArguments) (storage.RegistryImageReference, error) {
+func (s *Server) pullImage(ctx context.Context, pullArgs *pullArguments, runtimeHandler string) (storage.RegistryImageReference, error) {
 	var err error
 
 	ctx, span := log.StartSpan(ctx)
@@ -181,7 +183,7 @@ func (s *Server) pullImage(ctx context.Context, pullArgs *pullArguments) (storag
 		}
 	}
 
-	remoteCandidates, err := s.ContainerServer.ImageServiceMgr().GetImageService("").CandidatesForPotentiallyShortImageName(s.config.SystemContext, pullArgs.image)
+	remoteCandidates, err := s.ContainerServer.ImageServiceMgr().GetImageService(runtimeHandler).CandidatesForPotentiallyShortImageName(s.config.SystemContext, pullArgs.image)
 	if err != nil {
 		return storage.RegistryImageReference{}, err
 	}
@@ -190,7 +192,7 @@ func (s *Server) pullImage(ctx context.Context, pullArgs *pullArguments) (storag
 	lastErr := errors.New("internal error: pullImage failed but reported no error reason")
 
 	for _, remoteCandidateName := range remoteCandidates {
-		repoDigest, err := s.pullImageCandidate(ctx, &sourceCtx, remoteCandidateName, decryptConfig, cgroup)
+		repoDigest, err := s.pullImageCandidate(ctx, &sourceCtx, remoteCandidateName, decryptConfig, cgroup, runtimeHandler)
 		if err == nil {
 			// Update metric for successful image pulls
 			metrics.Instance().MetricImagePullsSuccessesInc(remoteCandidateName)
@@ -296,7 +298,7 @@ func (s *Server) prepareTempAuthFile(ctx context.Context, sysCtx *imageTypes.Sys
 	return cleanup, nil
 }
 
-func (s *Server) pullImageCandidate(ctx context.Context, sourceCtx *imageTypes.SystemContext, remoteCandidateName storage.RegistryImageReference, decryptConfig *encconfig.DecryptConfig, cgroup string) (storage.RegistryImageReference, error) {
+func (s *Server) pullImageCandidate(ctx context.Context, sourceCtx *imageTypes.SystemContext, remoteCandidateName storage.RegistryImageReference, decryptConfig *encconfig.DecryptConfig, cgroup string, runtimeHandler string) (storage.RegistryImageReference, error) {
 	// Collect pull progress metrics
 	progress := make(chan imageTypes.ProgressProperties)
 	defer close(progress)
@@ -309,7 +311,7 @@ func (s *Server) pullImageCandidate(ctx context.Context, sourceCtx *imageTypes.S
 	pullCtx, cancel := context.WithCancel(ctx)
 	go consumeImagePullProgress(ctx, cancel, s.ContainerServer.Config().PullProgressTimeout, progress, remoteCandidateName)
 
-	repoDigest, err := s.ContainerServer.ImageServiceMgr().GetImageService("").PullImage(pullCtx, remoteCandidateName, &storage.ImageCopyOptions{
+	repoDigest, err := s.ContainerServer.ImageServiceMgr().GetImageService(runtimeHandler).PullImage(pullCtx, remoteCandidateName, &storage.ImageCopyOptions{
 		SourceCtx:        sourceCtx,
 		DestinationCtx:   s.config.SystemContext,
 		OciDecryptConfig: decryptConfig,

@@ -29,18 +29,18 @@ func (s *Server) RemoveImage(ctx context.Context, req *types.RemoveImageRequest)
 		return nil, errors.New("no image specified")
 	}
 
-	if err := s.removeImage(ctx, imageRef); err != nil {
+	if err := s.removeImage(ctx, imageRef, img.GetRuntimeHandler()); err != nil {
 		return nil, err
 	}
 
 	return &types.RemoveImageResponse{}, nil
 }
 
-func (s *Server) removeImage(ctx context.Context, imageRef string) (untagErr error) {
+func (s *Server) removeImage(ctx context.Context, imageRef string, runtimeHandler string) (untagErr error) {
 	ctx, span := log.StartSpan(ctx)
 	defer span.End()
 
-	imageService := s.ContainerServer.ImageServiceMgr().GetImageService("")
+	imageService := s.ContainerServer.ImageServiceMgr().GetImageService(runtimeHandler)
 
 	if id := imageService.HeuristicallyTryResolvingStringAsIDPrefix(imageRef); id != nil {
 		if err := s.volumeInUse(id.IDStringForOutOfProcessConsumptionOnly()); err != nil {
