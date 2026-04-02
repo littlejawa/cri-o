@@ -318,7 +318,12 @@ func (c *ContainerServer) exportCheckpoint(ctx context.Context, ctr *oci.Contain
 		return fmt.Errorf("error exporting root file-system diff for %q: %w", id, err)
 	}
 
-	mountPoint, err := c.ImageServiceMgr().GetImageService("").GetStore().Mount(id, specgen.Linux.MountLabel)
+	var runtimeHandler string
+	if img := ctr.CRIContainer().GetImage(); img != nil {
+		runtimeHandler = img.GetRuntimeHandler()
+	}
+
+	mountPoint, err := c.ImageServiceMgr().GetImageService(runtimeHandler).GetStore().Mount(id, specgen.Linux.MountLabel)
 	if err != nil {
 		return fmt.Errorf("not able to get mountpoint for container %q: %w", id, err)
 	}

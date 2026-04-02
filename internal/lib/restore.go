@@ -48,7 +48,12 @@ func (c *ContainerServer) ContainerRestore(
 		return "", err
 	}
 
-	imageService := c.ImageServiceMgr().GetImageService("")
+	sb, err := c.LookupSandbox(ctr.Sandbox())
+	if err != nil {
+		return "", err
+	}
+
+	imageService := c.ImageServiceMgr().GetImageService(sb.RuntimeHandler())
 
 	// During checkpointing the container is unmounted. This mounts the container again.
 	mountPoint, err := imageService.GetStore().Mount(ctr.ID(), ctrSpec.Config.Linux.MountLabel)
@@ -61,11 +66,6 @@ func (c *ContainerServer) ContainerRestore(
 	log.Debugf(ctx, "Container mountpoint %v", mountPoint)
 	log.Debugf(ctx, "Sandbox %v", ctr.Sandbox())
 	log.Debugf(ctx, "Specgen.Config.Annotations[io.kubernetes.cri-o.SandboxID] %v", ctrSpec.Config.Annotations["io.kubernetes.cri-o.SandboxID"])
-
-	sb, err := c.LookupSandbox(ctr.Sandbox())
-	if err != nil {
-		return "", err
-	}
 
 	if ctr.RestoreArchivePath() != "" || ctr.RestoreStorageImageID() != nil {
 		if ctr.RestoreStorageImageID() != nil {
